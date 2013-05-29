@@ -29,91 +29,56 @@ use Symfony\Component\Yaml\Parser,
 class YMLFormatter extends PrettyFormatter
 {
 
-    /**
-     * List of features with all of their relevant attributes (tags, scenarios, outlines, examples)
-     *
-     * @var array
-     */
-    protected $features;
-
-    /**
-     * Current feature array, not yet written to a file.
-     *
-     * @var array
-     */
-    protected $feature;
-
-    /**
-     * Currently in a scenario
-     *
-     * @var type boolean
-     */
-    protected $inScenario;
-
-    /*     * f
-     * Current scenario array, not yet added to the features array.
-     *
-     * @var array
-     */
-    protected $scenario = false;
-    protected $inScenarioOutline = false;
-
-    /**
-     * List of tags that were run
-     *
-     * @var array
-     */
-    protected $tags = array();
-
-    /**
-     * Current HTML filename.
-     *
-     * @var string
-     */
-    protected $filename;
-
-    /**
-     * Documentation Directory
-     *
-     * @var string
-     */
-    protected $outputPath;
+    protected $outputDir;
+    protected $featuresDir = 'C:\wamp\www\cems\features\\';
     protected $tagsFile;
     protected $featuresFile;
-    protected $featuresDir = 'C:\\wamp\\www\\cems\\features\\';
+    protected $failuresFile;
+    protected $featureFile;
+    protected $tags = array();
+    protected $features = array();
+    protected $failures = array();
+    protected $feature = array();
+    protected $scenario = array();
 
-    /**
-     * Result types
-     *
-     * @var array
-     */
-    protected $resultTypes;
-
-    /**
-     * Returns an array of event names this subscriber wants to listen to.
-     *
-     * The array keys are event names and the value can be:
-     *
-     *  * The method name to call (priority defaults to 0)
-     *  * An array composed of the method name to call and the priority
-     *  * An array of arrays composed of the method names to call and respective
-     *    priorities, or 0 if unset
-     *
-     * For instance:
-     *
-     *  * array('eventName' => 'methodName')
-     *  * array('eventName' => array('methodName', $priority))
-     *  * array('eventName' => array(array('methodName1', $priority), array('methodName2'))
-     *
-     * @return array The event names to listen to
-     */
     public static function getSubscribedEvents()
     {
         $events = array(
-            'beforeSuite', 'afterSuite', 'beforeFeature', 'afterFeature', 'afterStep', 'beforeBackground', 'afterBackground', 'beforeScenario', 'afterScenario', 'beforeOutline', 'afterOutline', 'beforeOutlineExample', 'afterOutlineExample'
+            'beforeSuite', 'afterSuite', 'beforeFeature', 'afterFeature', 'beforeScenario',
+            'afterScenario', 'beforeBackground', 'afterBackground', 'beforeOutline', 'afterOutline',
+            'beforeOutlineExample', 'afterOutlineExample', 'beforeStep', 'afterStep'
         );
 
         return array_combine($events, $events);
+    }
+
+    public function addTag($tag, $featureTitle)
+    {
+        if (!isset($this->tags[$tag]))
+        {
+            $this->tags[$tag] = array();
+        }
+        if (!isset($this->tags[$tag][$this->filename]))
+        {
+            $this->tags[$tag][$this->filename] = array();
+        }
+        $this->tags[$tag][$this->filename]['feature'] = $featureTitle;
+    }
+
+    public function addScenarioTag($tag, $scenarioTitle, $scenarioLine, $featureTitle)
+    {
+        if (!isset($this->tags[$tag]))
+        {
+            $this->tags[$tag] = array();
+        }
+        if (!isset($this->tags[$tag][$this->filename]))
+        {
+            $this->tags[$tag][$this->filename] = array();
+        }
+        $this->tags[$tag][$this->filename]['scenarios'][$scenarioLine] = array(
+            'feature' => $featureTitle,
+            'scenario' => $scenarioTitle
+        );
     }
 
     /**
@@ -125,7 +90,7 @@ class YMLFormatter extends PrettyFormatter
      */
     public function beforeSuite(SuiteEvent $event)
     {
-        $this->outputPath = $this->parameters->get('output_path');
+        $this->outputDir = $this->parameters->get('output_path');
         $this->resultTypes = array(
             StepEvent::PASSED => 'success',
             StepEvent::SKIPPED => 'info',
@@ -134,8 +99,10 @@ class YMLFormatter extends PrettyFormatter
             StepEvent::FAILED => 'error'
         );
 
-        $this->tagsFile = $this->outputPath . DIRECTORY_SEPARATOR . 'tags.yml';
-        $this->featuresFile = $this->outputPath . DIRECTORY_SEPARATOR . 'features.yml';
+        $this->tagsFile = $this->outputDir . DIRECTORY_SEPARATOR . 'tags.yml';
+        $this->featuresFile = $this->outputDir . DIRECTORY_SEPARATOR . 'features.yml';
+
+        //Read in existing data
         if (is_file($this->tagsFile))
         {
             $yaml = new Parser();
@@ -159,18 +126,15 @@ class YMLFormatter extends PrettyFormatter
     public function afterSuite(SuiteEvent $event)
     {
         $this->flushOutputConsole();
-        $this->filename = 'index . html
-                 ';
 
         $dumper = new Dumper();
         asort($this->features);
         $yamlFeatures = $dumper->dump($this->features, 6);
-        file_put_contents($this->outputPath . DIRECTORY_SEPARATOR . "features.yml", $yamlFeatures);
+        file_put_contents($this->featuresFile, $yamlFeatures);
 
-        //$this->tags = array_unique($this->tags);
-        asort($this->tags);
-        $yamlTags = $dumper->dump($this->tags, 2);
-        file_put_contents($this->outputPath . DIRECTORY_SEPARATOR . "tags.yml", $yamlTags);
+        ksort($this->tags);
+        $yamlTags = $dumper->dump($this->tags, 4);
+        file_put_contents($this->tagsFile, $yamlTags);
     }
 
     /**
@@ -178,7 +142,7 @@ class YMLFormatter extends PrettyFormatter
      *
      * @param FeatureEvent $event
      *
-     * @uses printTestSuiteHeader()
+     * @uses printFeatureHeader()
      */
     public function beforeFeature(FeatureEvent $event)
     {
@@ -197,6 +161,10 @@ class YMLFormatter extends PrettyFormatter
 
         $tags = $feature->getTags();
         sort($tags);
+        foreach ($tags AS $tag)
+        {
+            $this->addTag($tag, $feature->getTitle());
+        }
         $title = $feature->getTitle();
 
         $this->feature = array(
@@ -204,38 +172,6 @@ class YMLFormatter extends PrettyFormatter
             'title' => $title,
             'description' => $feature->getDescription()
         );
-        /* if ($background)
-          {
-          $bg = array();
-          if ($background->getTitle())
-          {
-          $bg['title'] = $background->getTitle();
-          }
-          $bg['steps'] = $this->yamlFlattenSteps($background->getSteps());
-
-          $this->feature['background'] = $bg;
-          }
-          /* foreach ($scenarios AS $scenario)
-          {
-          $sArray = array();
-          $sArray['keyword'] = $scenario->getKeyword();
-          if ($scenario->getOwnTags())
-          {
-          $sArray['tags'] = $scenario->getOwnTags();
-          }
-          $sArray['title'] = $scenario->getTitle();
-          $sArray['steps'] = $this->yamlFlattenSteps($scenario->getSteps());
-          if ($scenario->getKeyword() == 'Scenario Outline')
-          {
-          if ($scenario->hasExamples())
-          {
-          $sArray['examples'] = $scenario->getExamples()->getHash();
-          }
-          }
-          $featureArray['scenarios'][$scenario->getLine()] = $sArray;
-          } */
-        //$featureArray['directory'] = $directories;
-        //Create the feature file
 
         $arr = array(
             'title' => addslashes($title),
@@ -244,11 +180,6 @@ class YMLFormatter extends PrettyFormatter
         );
         $dir = '$this->features[\'' . implode("']['", $directories) . "']['" . $this->filename . "'] = " . '$arr' . ";";
         eval($dir);
-
-        foreach ($tags AS $tag)
-        {
-            $this->tags[$tag][$this->filename] = $feature->getTitle();
-        }
     }
 
     /**
@@ -260,9 +191,11 @@ class YMLFormatter extends PrettyFormatter
      */
     public function afterFeature(FeatureEvent $event)
     {
+        $this->feature['result'] = $this->resultTypes[$event->getResult()];
+
         $dumper = new Dumper();
         $yamlFeatureArray = $dumper->dump($this->feature, 10);
-        file_put_contents($this->outputPath . DIRECTORY_SEPARATOR . $this->filename . '.yml', $yamlFeatureArray);
+        file_put_contents($this->outputDir . DIRECTORY_SEPARATOR . $this->filename . '.yml', $yamlFeatureArray);
         unset($this->feature);
     }
 
@@ -276,10 +209,7 @@ class YMLFormatter extends PrettyFormatter
     public function beforeBackground(BackgroundEvent $event)
     {
         $this->inBackground = true;
-        if ($event->getBackground())
-        {
-            $this->feature['background'] = array();
-        }
+        $this->feature['background'] = array();
     }
 
     /**
@@ -292,6 +222,7 @@ class YMLFormatter extends PrettyFormatter
     public function afterBackground(BackgroundEvent $event)
     {
         $this->inBackground = false;
+        $this->feature['background']['result'] = $this->resultTypes[$event->getResult()];
     }
 
     /**
@@ -303,30 +234,20 @@ class YMLFormatter extends PrettyFormatter
      */
     public function beforeOutline(OutlineEvent $event)
     {
-        $tags = $event->getOutline()->getOwnTags();
         $this->scenario = array(
-            'keyword' => $event->getOutline()->getKeyword(),
-            'title' => $event->getOutline()->getTitle(),
+            'title' => $event->getOutline()->getTitle()
         );
+        $tags = $event->getOutline()->getOwnTags();
         if (count($tags))
         {
             $this->scenario['tags'] = $tags;
+            foreach ($tags AS $tag)
+            {
+                $this->addScenarioTag($tag, $event->getOutline()->getTitle(), $event->getOutline()->getLine(),
+                        $event->getOutline()->getFeature()->getTitle());
+            }
         }
-        $this->inScenarioOutline = true;
-    }
-
-    /**
-     * Listens to "outline.after" event.
-     *
-     * @param OutlineEvent $event
-     *
-     * @uses printOutlineFooter()
-     */
-    public function afterOutline(OutlineEvent $event)
-    {
-        $this->inScenarioOutline = false;
-        $this->scenario['result'] = $this->resultTypes[$event->getResult()];
-        $this->feature['scenarios'][] = $this->scenario;
+        $this->scenario['keyword'] = $event->getOutline()->getKeyword();
     }
 
     /**
@@ -339,8 +260,27 @@ class YMLFormatter extends PrettyFormatter
     public function beforeOutlineExample(OutlineExampleEvent $event)
     {
         $this->inOutlineExample = true;
+        foreach ($event->getOutline()->getSteps() AS $step)
+        {
+            $this->scenario['steps'][$step->getLine()] = $this->flattenStep($step);
+        }
+    }
 
-        //$this->scenario['examples'];
+    public function flattenStep(StepNode $step)
+    {
+        $arr = array(
+            'type' => $step->getType(),
+            'text' => $step->getText()
+        );
+        if ($step->hasArguments())
+        {
+            $arr['arguments'] = array();
+            foreach ($step->getArguments() AS $argument)
+            {
+                $arr['arguments'][] = $argument->getHash();
+            }
+        }
+        return $arr;
     }
 
     /**
@@ -352,16 +292,20 @@ class YMLFormatter extends PrettyFormatter
      */
     public function afterOutlineExample(OutlineExampleEvent $event)
     {
-        /* $steps = $event->getOutline()->getSteps();
-          foreach ($steps AS $step)
-          {
-          $stepArray = array(
-          'type' => $step->getType(),
-          'text' => $step->getText()
-          );
-          $this->scenario['steps'][] = $stepArray;
-          } */
         $this->inOutlineExample = false;
+    }
+
+    /**
+     * Listens to "outline.after" event.
+     *
+     * @param OutlineEvent $event
+     *
+     * @uses printOutlineFooter()
+     */
+    public function afterOutline(OutlineEvent $event)
+    {
+        $this->scenario['result'] = $this->resultTypes[$event->getResult()];
+        $this->feature['scenarios'][] = $this->scenario;
     }
 
     /**
@@ -373,16 +317,19 @@ class YMLFormatter extends PrettyFormatter
      */
     public function beforeScenario(ScenarioEvent $event)
     {
-        $tags = $event->getScenario()->getOwnTags();
         $this->scenario = array(
-            'keyword' => $event->getScenario()->getKeyword(),
-            'title' => $event->getScenario()->getTitle(),
+            'title' => $event->getScenario()->getTitle()
         );
+        $tags = $event->getScenario()->getOwnTags();
         if (count($tags))
         {
             $this->scenario['tags'] = $tags;
+            foreach ($tags AS $tag)
+            {
+                $this->addScenarioTag($tag, $event->getOutline()->getTitle(), $event->getOutline()->getLine());
+            }
         }
-        $this->inScenario = true;
+        $this->scenario['keyword'] = $event->getScenario()->getKeyword();
     }
 
     /**
@@ -394,9 +341,20 @@ class YMLFormatter extends PrettyFormatter
      */
     public function afterScenario(ScenarioEvent $event)
     {
-        $this->inScenario = false;
         $this->scenario['result'] = $this->resultTypes[$event->getResult()];
         $this->feature['scenarios'][] = $this->scenario;
+    }
+
+    /**
+     * Listens to "step.before" event.
+     *
+     * @param StepEvent $event
+     *
+     * @uses printStep()
+     */
+    public function beforeStep(StepEvent $event)
+    {
+
     }
 
     /**
@@ -408,56 +366,22 @@ class YMLFormatter extends PrettyFormatter
      */
     public function afterStep(StepEvent $event)
     {
-        $step = array(
-            'type' => $event->getStep()->getType(),
-            'text' => $event->getStep()->getText(),
-            'result' => $this->resultTypes[$event->getResult()]
-        );
-
+        $step = $event->getStep();
+        $stepArr = $this->flattenStep($step);
+        $stepArr['result'] = $this->resultTypes[$event->getResult()];
 
         if ($this->inBackground)
         {
-            $this->feature['background']['steps'][] = $step;
+            $this->feature['background']['steps'][$step->getLine()] = $stepArr;
         }
-        else if ($this->inScenario)
+        else if ($this->inOutlineExample)
         {
-            $this->scenario['steps'][] = $step;
+            $this->scenario['executedSteps'][] = $stepArr;
         }
-        else if ($this->inScenarioOutline)
+        else
         {
-            $this->scenario['examplesExecuted'][] = $step;
-            $this->delayedStepEvents[] = $event;
+            $this->scenario['steps'][$step->getLine()] = $stepArr;
         }
-    }
-
-    public function yamlFlattenSteps($steps)
-    {
-        $arr = array();
-        foreach ($steps AS $step)
-        {
-            $arr[$step->getLine()] = $this->yamlFlattenStep($step);
-        }
-        return $arr;
-    }
-
-    public
-            function yamlFlattenStep($step)
-    {
-        $arr = array(
-            'type' => $step->getType(),
-            'text' => $step->getText()
-        );
-        if ($step->getArguments())
-        {
-            foreach ($step->getArguments() AS $argument)
-            {
-                if ($argument instanceOf TableNode)
-                {
-                    $arr['arguments'][] = $argument->getHash();
-                }
-            }
-        }
-        return $arr;
     }
 
 }
