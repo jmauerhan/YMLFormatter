@@ -1,6 +1,7 @@
 <?php
 
-use Behat\Behat\Formatter\PrettyFormatter;
+use Symfony\Component\DependencyInjection\ParameterBag\ParameterBag,
+    Behat\Behat\Formatter\PrettyFormatter;
 use Behat\Behat\Definition\DefinitionInterface,
     Behat\Behat\Definition\DefinitionSnippet,
     Behat\Behat\DataCollector\LoggerDataCollector,
@@ -29,17 +30,94 @@ use Symfony\Component\Yaml\Parser,
 class YMLFormatter extends PrettyFormatter
 {
 
-    protected $outputDir;
+    /**
+     * The folder in which the config yml files will be placed (tags.yml, features.yml, failed.yml, etc)
+     *
+     * @var string
+     */
+    protected $docsDir;
+
+    /**
+     * The folder in which the individual feature yml files will be placed.
+     *
+     * @var string
+     */
+    protected $ymlFeaturesDir;
+
+    /**
+     * The name of the tags config file.
+     *
+     * @var string
+     */
+    protected $tagsFile = 'tags.yml';
+
+    /**
+     * The name of the features config file.
+     *
+     * @var string
+     */
+    protected $featuresFile = 'features.yml';
+
+    /**
+     * The name of the failures config file.
+     *
+     * @var string
+     */
+    protected $failuresFile = 'failures.yml';
+
+    /**
+     * The folder in which the .feature files are located
+     *
+     * @var string
+     */
     protected $featuresDir = 'C:\wamp\www\cems\features\\';
-    protected $tagsFile;
-    protected $featuresFile;
-    protected $failuresFile;
-    protected $featureFile;
+
+    /**
+     * All of the existing tags
+     *
+     * @var array
+     */
     protected $tags = array();
+
+    /**
+     * All of the existing features
+     *
+     * @var array
+     */
     protected $features = array();
+
+    /**
+     * All of the existing failures
+     *
+     * @var array
+     */
     protected $failures = array();
+
+    /**
+     * The current feature (not yet written to a file)
+     *
+     * @var array
+     */
     protected $feature = array();
+
+    /**
+     * The current scenarion (not yet stored in $this->feature)
+     *
+     * @var array
+     */
     protected $scenario = array();
+
+    /**
+     * Initialize formatter.
+     *
+     * @uses getDefaultParameters()
+     */
+    public function __construct()
+    {
+        $this->parameters = new ParameterBag(array_merge(array(
+                    'hard_reset' => false
+                        ), $this->getDefaultParameters()));
+    }
 
     public static function getSubscribedEvents()
     {
@@ -81,6 +159,52 @@ class YMLFormatter extends PrettyFormatter
         );
     }
 
+    public function processParameters()
+    {
+        $this->docsDir = $this->parameters->get('output_path');
+        $this->ymlFeaturesDir = $this->docsDir . DIRECTORY_SEPARATOR . 'features';
+        if (!is_dir($this->docsDir))
+        {
+            mkdir($this->docsDir);
+        }
+        if (!is_dir($this->ymlFeaturesDir))
+        {
+            mkdir($this->ymlFeaturesDir);
+        }
+
+        if ($this->hasParameter('tags_file'))
+        {
+            $this->tagsFile = $this->docsDir . DIRECTORY_SEPARATOR . $this->parameters->get('tags_file');
+        }
+        else
+        {
+            $this->tagsFile = $this->docsDir . DIRECTORY_SEPARATOR . 'tags.yml';
+        }
+
+        if ($this->hasParameter('features_file'))
+        {
+            $this->featuresFile = $this->docsDir . DIRECTORY_SEPARATOR . $this->parameters->get('features_file');
+        }
+        else
+        {
+            $this->featuresFile = $this->docsDir . DIRECTORY_SEPARATOR . 'features.yml';
+        }
+
+        if ($this->hasParameter('failures_file'))
+        {
+            $this->failuresFile = $this->docsDir . DIRECTORY_SEPARATOR . $this->parameters->get('failures_file');
+        }
+        else
+        {
+            $this->failuresFile = $this->docsDir . DIRECTORY_SEPARATOR . 'failures.yml';
+        }
+
+        if ($this->hasParameter('hard_reset') && $this->parameters->get('hard_reset'))
+        {
+            $this->hardReset();
+        }
+    }
+
     /**
      * Listens to "suite.before" event.
      *
@@ -90,7 +214,8 @@ class YMLFormatter extends PrettyFormatter
      */
     public function beforeSuite(SuiteEvent $event)
     {
-        $this->outputDir = $this->parameters->get('output_path');
+        $this->processParameters();
+
         $this->resultTypes = array(
             StepEvent::PASSED => 'success',
             StepEvent::SKIPPED => 'info',
@@ -98,9 +223,6 @@ class YMLFormatter extends PrettyFormatter
             StepEvent::UNDEFINED => 'warning',
             StepEvent::FAILED => 'error'
         );
-
-        $this->tagsFile = $this->outputDir . DIRECTORY_SEPARATOR . 'tags.yml';
-        $this->featuresFile = $this->outputDir . DIRECTORY_SEPARATOR . 'features.yml';
 
         //Read in existing data
         if (is_file($this->tagsFile))
@@ -135,6 +257,10 @@ class YMLFormatter extends PrettyFormatter
         ksort($this->tags);
         $yamlTags = $dumper->dump($this->tags, 4);
         file_put_contents($this->tagsFile, $yamlTags);
+
+        ksort($this->failures);
+        $yamlFailures = $dumper->dump($this->failures, 4);
+        file_put_contents($this->failuresFile, $yamlFailures);
     }
 
     /**
@@ -192,10 +318,9 @@ class YMLFormatter extends PrettyFormatter
     public function afterFeature(FeatureEvent $event)
     {
         $this->feature['result'] = $this->resultTypes[$event->getResult()];
-
         $dumper = new Dumper();
         $yamlFeatureArray = $dumper->dump($this->feature, 10);
-        file_put_contents($this->outputDir . DIRECTORY_SEPARATOR . $this->filename . '.yml', $yamlFeatureArray);
+        file_put_contents($this->ymlFeaturesDir . DIRECTORY_SEPARATOR . $this->filename . '.yml', $yamlFeatureArray);
         unset($this->feature);
     }
 
@@ -248,6 +373,8 @@ class YMLFormatter extends PrettyFormatter
             }
         }
         $this->scenario['keyword'] = $event->getOutline()->getKeyword();
+        $examples = $event->getOutline()->getExamples();
+        $this->scenario['examples'] = $examples->getHash();
     }
 
     /**
@@ -274,10 +401,19 @@ class YMLFormatter extends PrettyFormatter
         );
         if ($step->hasArguments())
         {
-            $arr['arguments'] = array();
+            $arr['argument'] = array();
             foreach ($step->getArguments() AS $argument)
             {
-                $arr['arguments'][] = $argument->getHash();
+                if ($argument instanceof TableNode)
+                {
+                    $arr['argument']['type'] = 'table';
+                    $arr['argument']['data'] = $argument->getHash();
+                }
+                else if ($argument instanceOf PyStringNode)
+                {
+                    $arr['argument']['type'] = 'string';
+                    $arr['argument']['data'] = $argument->getLines();
+                }
             }
         }
         return $arr;
@@ -293,6 +429,10 @@ class YMLFormatter extends PrettyFormatter
     public function afterOutlineExample(OutlineExampleEvent $event)
     {
         $this->inOutlineExample = false;
+        $this->scenario['examples'][$event->getIteration()] = array(
+            'data' => $this->scenario['examples'][$event->getIteration()],
+            'result' => $this->resultTypes[$event->getResult()]
+        );
     }
 
     /**
@@ -304,8 +444,20 @@ class YMLFormatter extends PrettyFormatter
      */
     public function afterOutline(OutlineEvent $event)
     {
+        $this->logScenario($event, $event->getOutline());
+    }
+
+    public function logScenario(Symfony\Component\EventDispatcher\Event $event, $scenario)
+    {
         $this->scenario['result'] = $this->resultTypes[$event->getResult()];
-        $this->feature['scenarios'][] = $this->scenario;
+        $this->feature['scenarios'][$scenario->getLine()] = $this->scenario;
+        if ($this->scenario['result'] != $this->resultTypes[0])
+        {
+            $this->failures[$this->filename]['feature'] = $scenario->getFeature()->getTitle();
+            $this->failures[$this->filename]['scenarios'][$scenario->getLine()]['scenario'] = $scenario->getTitle();
+            //$this->failures[$this->filename]['scenarios'][$scenario->getLine()]['step'] =
+        }
+        unset($this->scenario);
     }
 
     /**
@@ -326,7 +478,8 @@ class YMLFormatter extends PrettyFormatter
             $this->scenario['tags'] = $tags;
             foreach ($tags AS $tag)
             {
-                $this->addScenarioTag($tag, $event->getOutline()->getTitle(), $event->getOutline()->getLine());
+                $this->addScenarioTag($tag, $event->getScenario()->getTitle(), $event->getScenario()->getLine(),
+                        $event->getScenario()->getFeature()->getTitle());
             }
         }
         $this->scenario['keyword'] = $event->getScenario()->getKeyword();
@@ -341,8 +494,7 @@ class YMLFormatter extends PrettyFormatter
      */
     public function afterScenario(ScenarioEvent $event)
     {
-        $this->scenario['result'] = $this->resultTypes[$event->getResult()];
-        $this->feature['scenarios'][] = $this->scenario;
+        $this->logScenario($event, $event->getScenario());
     }
 
     /**
@@ -381,6 +533,20 @@ class YMLFormatter extends PrettyFormatter
         else
         {
             $this->scenario['steps'][$step->getLine()] = $stepArr;
+        }
+    }
+
+    public function hardReset()
+    {
+        $files = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($this->outputDir, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($files as $fileinfo)
+        {
+            $todo = ($fileinfo->isDir() ? 'rmdir' : 'unlink');
+            $todo($fileinfo->getRealPath());
         }
     }
 
